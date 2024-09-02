@@ -21,36 +21,56 @@ class ads92x4(LiteXModule):
             ]
         )
 
-        self.read_cycles = Signal(4, reset=0)
+        self.read_cycles = Signal(5, reset=0)
         self.shift_reg_a = Signal(16, reset=0)
         self.shift_reg_b = Signal(16, reset=0)
 
         self.comb += self.pads.conv_st.eq(self.smp_clk)
-        self.comb += self.pads.sclk.eq(ClockSignal())
-        
 
         self.fsm = FSM(reset_state="IDLE")
         self.fsm.act(
             "IDLE",
             NextValue(self.data_cha, self.shift_reg_a),
             NextValue(self.data_chb, self.shift_reg_b),
-            NextValue(self.pads.cs, 1),
             NextValue(self.read_cycles, 0),
+            NextValue(self.pads.cs, 1),
             If(self.smp_clk, NextState("WAIT_RDY")),
         )
         self.fsm.act(
             "WAIT_RDY",
-            If(self.pads.ready_strobe, NextState("READ"), NextValue(self.pads.cs, 0)),
+            If(
+                self.pads.ready_strobe,
+                NextState("ASSERT_CS"),
+                NextValue(self.pads.cs, 0),
+            ),
+        )
+        self.fsm.act(
+            "ASSERT_CS",
+            NextState("READ"),
+            NextValue(self.shift_reg_a, Cat(self.pads.miso_a, self.shift_reg_a[:-1])),
+            NextValue(self.shift_reg_b, Cat(self.pads.miso_b, self.shift_reg_b[:-1])),
         )
         self.fsm.act(
             "READ",
-            NextValue(self.read_cycles, self.read_cycles + 1),
-            NextValue(self.shift_reg_a, Cat(self.pads.miso_a, self.shift_reg_a[:-1])),
-            NextValue(self.shift_reg_b, Cat(self.pads.miso_b, self.shift_reg_b[:-1])),
-            If(self.read_cycles == 15, NextState("ENSURE_SMP_CLK_LOW"), NextValue(self.pads.cs, 1),),
+            If(
+                self.read_cycles == 15,
+                NextState("ENSURE_SMP_CLK_LOW"),
+                NextValue(self.pads.cs, 1),
+                NextValue(self.read_cycles, 0),
+            ).Else(
+                NextValue(self.read_cycles, self.read_cycles + 1),
+                NextValue(
+                    self.shift_reg_a, Cat(self.pads.miso_a, self.shift_reg_a[:-1])
+                ),
+                NextValue(
+                    self.shift_reg_b, Cat(self.pads.miso_b, self.shift_reg_b[:-1])
+                ),
+            ),
         )
         self.fsm.act(
             "ENSURE_SMP_CLK_LOW",
             NextValue(self.pads.cs, 1),
             If(~self.smp_clk, NextState("IDLE")),
         )
+
+        self.comb += self.pads.sclk.eq(ClockSignal() & self.fsm.ongoing("READ"))
