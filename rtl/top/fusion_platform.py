@@ -119,7 +119,6 @@ def build_io():
 
 
 class FusionPlatform(LatticeECP5Platform):
-    
     def __init__(self, io=None):
         LatticeECP5Platform.__init__(
             self, "LFE5U-12F-6TQFP144", io or build_io(), toolchain="trellis"
@@ -137,7 +136,7 @@ class FusionPlatform(LatticeECP5Platform):
         self.clk_mod.comb += self.clk_mod.fmc_clk.clk.eq(self.fmc_pads.clk)
         self.clk_mod.comb += self.clk_mod.fmc_clk.rst.eq(~self.reset)
         self.have_data = self.request("have_data")
-        self.add_period_constraint(self.fmc_pads.clk, 1e9/100e6)
+        self.add_period_constraint(self.fmc_pads.clk, 1e9 / 100e6)
 
     def register_main_clock(self, module):
         module.submodules.clk_gen = self.clk_mod
@@ -145,6 +144,8 @@ class FusionPlatform(LatticeECP5Platform):
 
 def analog_two_build_io():
     return _io + [
+        ("IO3", 0, Pins("25"), IOStandard("LVCMOS33")),
+        ("IO2", 0, Pins("23"), IOStandard("LVCMOS33")),
         (
             "ADC1",
             0,
@@ -203,11 +204,11 @@ def analog_two_build_io():
             ),
             Subsignal(
                 "miso_a",
-                Pins("114"),
+                Pins("115"),
             ),
             Subsignal(
                 "miso_b",
-                Pins("115"),
+                Pins("114"),
             ),
             IOStandard("LVCMOS33"),
         ),
@@ -219,6 +220,8 @@ class AnalogTwoPlatform(FusionPlatform):
         super().__init__(io=analog_two_build_io())
         self.adc1_pads = self.request("ADC1")
         self.adc2_pads = self.request("ADC2")
+        self.io3 = self.request("IO3")
+        self.io2 = self.request("IO2")
 
     def connect_adc1(self, adc1):
         adc1.comb += adc1.pads.ready_strobe.eq(self.adc1_pads.ready_strobe)

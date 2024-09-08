@@ -30,6 +30,7 @@ public:
                     while (!FPGA::have_data())
                         ;
                     // have data means fpga fifo has at least 32 words
+                    #pragma GCC unroll 32
                     for (auto _ = 0U; _ < 32; _++)
                     {
                         reinterpret_cast<uint32_t*>(p.data)[p.count / 4] = FPGA::value(p.count / 4);

@@ -1,13 +1,14 @@
 #pragma once
-#include "fusion_bsp/board.hpp"
-#include "buffers.hpp"
 #include "board_states.hpp"
-#include <modm/processing/rtos.hpp>
+#include "buffers.hpp"
+#include "fusion_bsp/board.hpp"
 #include <modm/processing.hpp>
+#include <modm/processing/rtos.hpp>
 #include <modm/processing/rtos/queue.hpp>
 
-#include <tusb.h>
 #include <cmath>
+#include <tusb.h>
+#include <class/cdc/cdc_device.h>
 
 using namespace Board;
 using namespace modm::platform;
@@ -29,7 +30,8 @@ class UsbTask : modm::rtos::Thread
 
             while (tud_cdc_n_available(CDC_port) && packet->count < packet->capacity)
             {
-                packet->count += tud_cdc_n_read(CDC_port, packet->data + packet->count, packet->capacity - packet->count);
+                packet->count += tud_cdc_n_read(
+                    CDC_port, packet->data + packet->count, packet->capacity - packet->count);
                 LED2::set(0);
             }
 
@@ -50,18 +52,15 @@ class UsbTask : modm::rtos::Thread
     {
         if (auto data_to_send = Queue::maybe_tx(1); data_to_send)
         {
-            tud_cdc_n_write(CDC_port, data_to_send->data, data_to_send->count);
-            // tud_cdc_n_write_flush(CDC_port);
+            while(tud_cdc_n_write(CDC_port, data_to_send->data, data_to_send->count)!=data_to_send->count)
+                tud_task();
         }
     }
 
 public:
-    UsbTask() : Thread(1, 1024, "usb_task")
-    {
-    }
+    UsbTask() : Thread(1, 1024, "usb_task") { }
 
-    void
-    run()
+    void run()
     {
         Board::initializeUsbHs();
         tusb_init();

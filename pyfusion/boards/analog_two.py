@@ -12,6 +12,6 @@ class AnalogTwo(Fusion):
         buffer = self.data_if.read(nbytes)
         values = np.frombuffer(buffer, dtype=np.int16)
         for i in range(6):
-            if values[i] == -3856:
+            if values[i] == 4080:
                 values = values[i:].copy()
         return [values[i::6] for i in range(2, 6)]

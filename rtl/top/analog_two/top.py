@@ -5,6 +5,12 @@ from litex.gen import *
 from litex.build.generic_platform import *
 from litex.build.lattice import LatticeECP5Platform
 import os
+import argparse
+
+parser = argparse.ArgumentParser(description="Analog Two Top Module")
+parser.add_argument("--sim", action="store_true", help="Produce simulation verilog")
+args = parser.parse_args()
+
 
 __HERE__ = os.path.abspath(os.path.dirname(__file__))
 
@@ -15,49 +21,65 @@ sys.path.append(os.path.join(__HERE__, "../../HDL/"))
 
 from fusion_platform import AnalogTwoPlatform
 from nor_interface import Stm32FmcNorInterface
-from ads92x4 import ads92x4
 from data_encoder import DataEncoder
+from acquisition_pipeline import AcquisitionPipeline
 
 
 class TopModule(LiteXModule):
-    def __init__(self, platform):
+    def __init__(
+        self, platform, smp_clk_div=7, external_smp_clk=False, over_sampling=1, zone=2
+    ):
         self.smp_clk_cntr = Signal(16, reset=0)
         self.sync += self.smp_clk_cntr.eq(self.smp_clk_cntr + 1)
 
         self.smp_clk = Signal()
-        self.comb += self.smp_clk.eq(self.smp_clk_cntr[7])
 
-        self.nor_if = Stm32FmcNorInterface(pads=platform.fmc_pads)
-        self.submodules += self.nor_if
-        self.adc1 = ads92x4()
-        self.adc2 = ads92x4()
-        self.submodules.adc1 = self.adc1
-        self.submodules.adc2 = self.adc2
+        if external_smp_clk:
+            self.comb += self.smp_clk.eq(platform.io3)
+        else:
+            self.comb += self.smp_clk.eq(self.smp_clk_cntr[smp_clk_div])
 
-        self.data_encoder = DataEncoder(adc_count=2)
-        self.submodules.data_encoder = self.data_encoder
+        self.acquisition_pipeline = AcquisitionPipeline(
+            adc_count=2,
+            fmc_data_width=platform.fmc_pads.data.nbits,
+            fmc_address_width=platform.fmc_pads.address.nbits,
+            fifo_depth=2048,
+            fifo_count=48,
+            use_chained_fifo=True,
+            smp_clk_is_synchronous=not external_smp_clk,
+            oversampling=over_sampling,
+            zone=zone,
+        )
 
-        self.comb += self.adc1.smp_clk.eq(self.smp_clk)
-        self.comb += self.adc2.smp_clk.eq(self.smp_clk)
+        self.submodules += self.acquisition_pipeline
 
-        platform.connect_adc1(self.adc1)
-        platform.connect_adc2(self.adc2)
+        platform.connect_adc1(self.acquisition_pipeline.adcs[0])
+        platform.connect_adc2(self.acquisition_pipeline.adcs[1])
 
-        for i, adc in enumerate((self.adc1, self.adc2)):
-            self.comb += self.data_encoder.adc_if[i].data_cha.eq(adc.data_cha)
-            self.comb += self.data_encoder.adc_if[i].data_chb.eq(adc.data_chb)
-
-        self.comb += self.nor_if.fifo_din.eq(self.data_encoder.fifo_if.fifo_din)
-        self.comb += self.nor_if.fifo_we.eq(self.data_encoder.fifo_if.fifo_we)
-        self.comb += self.data_encoder.smp_clk.eq(self.smp_clk)
-
-        self.comb += platform.have_data.eq(self.nor_if.have_data)
+        self.acquisition_pipeline.nor_if.connect_data_pads(platform.fmc_pads.data)
+        self.comb += self.acquisition_pipeline.nor_if.address.eq(
+            platform.fmc_pads.address
+        )
+        self.comb += self.acquisition_pipeline.nor_if.ne.eq(platform.fmc_pads.ne)
+        self.comb += self.acquisition_pipeline.nor_if.noe.eq(platform.fmc_pads.noe)
+        self.comb += self.acquisition_pipeline.nor_if.nwe.eq(platform.fmc_pads.nwe)
+        self.comb += self.acquisition_pipeline.smp_clk.eq(self.smp_clk)
+        self.comb += platform.have_data.eq(self.acquisition_pipeline.have_data)
 
 
 platform = AnalogTwoPlatform()
-top = TopModule(platform)
+top = TopModule(
+    platform, smp_clk_div=5, over_sampling=4, external_smp_clk=False, zone=2
+)
 platform.register_main_clock(top)
 
 # Build --------------------------------------------------------------------------------------------
 
-platform.build(top)
+
+if __name__ == "__main__":
+    if args.sim:
+        from migen.fhdl.verilog import convert
+
+        convert(top).write("TopModule.v")
+    else:
+        platform.build(top)
